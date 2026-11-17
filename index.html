@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f7f5">
+  <title>Tennis Schedule</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f7f7f5;
+      --paper: #ffffff;
+      --ink: #20211f;
+      --muted: #777a73;
+      --line: #e9e9e4;
+      --accent: #315b43;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    main {
+      width: min(100% - 36px, 720px);
+      margin: 0 auto;
+      padding: 64px 0 80px;
+    }
+    header { margin-bottom: 28px; }
+    h1 {
+      margin: 0;
+      font-size: clamp(27px, 5vw, 34px);
+      line-height: 1.15;
+      font-weight: 650;
+      letter-spacing: -0.045em;
+    }
+    .subtitle {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+    .table-wrap {
+      overflow: hidden;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+    }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    thead { background: #fbfbfa; }
+    th {
+      padding: 15px 20px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .075em;
+      text-align: left;
+      text-transform: uppercase;
+    }
+    td {
+      padding: 17px 20px;
+      border-top: 1px solid var(--line);
+      font-size: 15px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    th:first-child, td:first-child { width: 37%; }
+    th:last-child, td:last-child { width: 22%; text-align: right; }
+    td:last-child { font-variant-numeric: tabular-nums; font-weight: 600; }
+    .empty {
+      padding: 42px 20px;
+      color: var(--muted);
+      text-align: center;
+      font-size: 14px;
+    }
+    .error { color: #9b3d35; }
+    @media (max-width: 520px) {
+      main { width: min(100% - 24px, 720px); padding-top: 38px; }
+      th, td { padding-left: 13px; padding-right: 13px; }
+      th:first-child, td:first-child { width: 39%; }
+      th:last-child, td:last-child { width: 21%; }
+      td { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Tennis Schedule</h1>
+      <p class="subtitle">Upcoming 7 days</p>
+    </header>
+    <section class="table-wrap" aria-label="Upcoming tennis bookings">
+      <table id="schedule-table" hidden>
+        <thead>
+          <tr><th scope="col">Date</th><th scope="col">Court</th><th scope="col">Time</th></tr>
+        </thead>
+        <tbody id="schedule-body"></tbody>
+      </table>
+      <div id="message" class="empty" role="status">Loading schedule…</div>
+    </section>
+  </main>
+  <script>
+    const DATA_FILE = `schedule.json`;
+    const REFRESH_EVERY_MS = 20000;
+    const TIME_ZONE = "Asia/Bangkok";
+
+    function bangkokDateKey(date) {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit"
+      }).formatToParts(date);
+      const p = Object.fromEntries(parts.map(part => [part.type, part.value]));
+      return `${p.year}-${p.month}-${p.day}`;
+    }
+
+    function dateKeyAfter(days) {
+      const todayKey = bangkokDateKey(new Date());
+      const [year, month, day] = todayKey.split("-").map(Number);
+      const shifted = new Date(Date.UTC(year, month - 1, day + days));
+      return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
+    }
+
+    function prettyDate(dateKey) {
+      const [year, month, day] = dateKey.split("-").map(Number);
+      const date = new Date(Date.UTC(year, month - 1, day, 12));
+      return new Intl.DateTimeFormat("en-GB", {
+        timeZone: "UTC", weekday: "short", day: "numeric", month: "short"
+      }).format(date);
+    }
+
+    function validBooking(item) {
+      return item &&
+        typeof item.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.date) &&
+        typeof item.court === "string" && item.court.trim() &&
+        typeof item.time === "string" && item.time.trim();
+    }
+
+    function render(bookings) {
+      const start = bangkokDateKey(new Date());
+      const end = dateKeyAfter(6);
+      const visible = bookings
+        .filter(validBooking)
+        .filter(item => item.date >= start && item.date <= end)
+        .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.court.localeCompare(b.court));
+
+      const table = document.getElementById("schedule-table");
+      const body = document.getElementById("schedule-body");
+      const message = document.getElementById("message");
+      body.replaceChildren();
+
+      if (visible.length === 0) {
+        table.hidden = true;
+        message.hidden = false;
+        message.classList.remove("error");
+        message.textContent = "No upcoming bookings.";
+        return;
+      }
+
+      for (const booking of visible) {
+        const row = document.createElement("tr");
+        for (const value of [prettyDate(booking.date), booking.court, booking.time]) {
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.appendChild(cell);
+        }
+        body.appendChild(row);
+      }
+      message.hidden = true;
+      table.hidden = false;
+    }
+
+    async function loadSchedule() {
+      const message = document.getElementById("message");
+      try {
+        const response = await fetch(`${DATA_FILE}?v=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`Schedule file returned ${response.status}`);
+        const bookings = await response.json();
+        if (!Array.isArray(bookings)) throw new Error("Schedule file must contain a JSON list");
+        render(bookings);
+      } catch (error) {
+        message.hidden = false;
+        message.classList.add("error");
+        message.textContent = "Schedule is temporarily unavailable.";
+        console.error("Could not load schedule:", error);
+      }
+    }
+
+    loadSchedule();
+    setInterval(loadSchedule, REFRESH_EVERY_MS);
+  </script>
+</body>
+</html>
